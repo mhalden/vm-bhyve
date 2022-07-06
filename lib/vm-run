@@ -555,7 +555,7 @@ vm::bhyve_device_disks(){
 #
 vm::bhyve_device_networking(){
     local _type _switch _mac _custom_tap _tap _sid _mtu
-    local _num=0 _member_type _sw_type _iname
+    local _num=0 _member_type _sw_type _iname _vlans _vlan _vlanif
 
     while true; do
         config::get "_type" "network${_num}_type"
@@ -565,6 +565,7 @@ vm::bhyve_device_networking(){
         config::get "_mac" "network${_num}_mac"
         config::get "_custom_tap" "network${_num}_device"
         config::get "_iname" "network${_num}_name"
+        config::get "_vlans" "network${_num}_vlans"
 
         # set a static mac if we don't have one
         [ -z "${_mac}" ] && vm::generate_static_mac
@@ -634,6 +635,47 @@ vm::bhyve_device_networking(){
 
                 _func=$((_func + 1))
                 [ -z "${_custom_tap}" ] && _taplist="${_taplist}${_taplist:+ }${_tap}"
+            fi
+
+            if [ -z "${_custom_tap}" ] && [ -n "${_vlans}" ]; then
+                for _vlan in ${_vlans}; do
+                    _vlanif="${_tap}.${_vlan}"
+
+                    _member_type="addm"
+
+                    config::get "_switch" "network${_num}_${_vlan}_switch"
+                    config::yesno "network${_num}_${_vlan}_span" && _member_type="span"
+
+                    util::log "guest" "${_name}" "initialising network device ${_vlanif}"
+                    ifconfig "${_vlanif}" create
+                    ifconfig "${_vlanif}" descr "vmnet/${_name}/${_num}.${_vlan}/${_switch:-custom}" group vm-port > /dev/null 2>&1
+
+                    if [ -n "${_switch}" ]; then
+                        switch::id "_sid" "${_switch}"
+
+                        if [ -n "${_sid}" ]; then
+                            _mtu=$(ifconfig "${_sid}" | head -n1 | awk '{print $NF}')
+
+                            if [ "${_mtu}" != "1500" ]; then
+                                util::log "guest" "${_name}" "setting mtu of ${_vlanif} to ${_mtu}"
+                                ifconfig "${_vlanif}" mtu "${_mtu}" >/dev/null 2>&1
+                            fi
+
+                            util::log "guest" "${_name}" "adding ${_vlanif} -> ${_sid} (${_switch} ${_member_type})"
+                            ifconfig "${_sid}" "${_member_type}" "${_vlanif}" >/dev/null 2>&1 || util::log "guest" "${_name}" "failed to add ${_vlanif} to ${_sid}"
+
+                            util::log "guest" "${_name}" "bring up ${_vlanif} -> ${_sid} (${_switch} ${_member_type})"
+                            ifconfig "${_vlanif}" up >/dev/null 2>&1 || util::log "guest" "${_name}" "failed to bring up ${_vlanif} in ${_sid}"
+
+                            # set private if configured
+                            switch::is_private "${_switch}" && ifconfig "${_sid}" "private" "${_vlanif}" >/dev/null 2>&1
+                        else
+                            util::log "guest" "${_name}" "failed to find virtual switch '${_switch}'"
+                        fi
+                    fi
+
+                    _taplist="${_taplist}${_taplist:+ }${_vlanif}"
+                done
             fi
         fi
 

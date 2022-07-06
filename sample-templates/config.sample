@@ -284,6 +284,12 @@ network0_mac=""
 #
 network0_span="no"
 
+network0_vlans="100 200"
+network0_vlan100_switch="public"
+network0_vlan100_span="no"
+network0_vlan200_switch="internal"
+network0_vlan200_span="no"
+
 # passthru0
 # Add a pass-through PCI device to the virtual machine. This allows the guest
 # to access a hardware device no differently than if it was running on bare
